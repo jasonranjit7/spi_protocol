@@ -8,7 +8,7 @@ module spi_slave(input sclk,
   
   reg [7:0] sl_out;
   reg state, nxt_state;
-  reg [2:0] count;
+  reg [3:0] count;
   
   localparam IDLE = 1'b0,
   			 TRANSFER = 1'b1;
@@ -17,15 +17,17 @@ module spi_slave(input sclk,
   always@(negedge sclk) begin
     if(rst)
       count <= 0;
-    else
+    else if(state == TRANSFER)
       count <= count + 1;
+    else 
+      count <=0;
   end
   
   //state register
   always@(negedge sclk) begin
     if(rst)
       state <= IDLE;
-    else 
+    else
       state <= nxt_state;
   end
   
@@ -37,12 +39,13 @@ module spi_slave(input sclk,
     end
     else if(state == TRANSFER) begin
       sl_out <= {sl_out[6:0],1'b0}; //MSB shifted out
-      sl_in <= {mosi, sl_in[7:1]}; //MOSI shifted into MSB
+      sl_in <= {sl_in[6:0], mosi}; //MOSI shifted into MSB
     end
   end
 
   always@(*) begin
     nxt_state = state;
+    miso = 0;
     case(state)
       IDLE: begin
         if(!cs) //slave turns on at cs low
@@ -52,7 +55,7 @@ module spi_slave(input sclk,
       end
       TRANSFER: begin
         miso = sl_out[7]; //MSB sent out
-        if(!cs && count<8)
+        if(!cs && count!=4'd8)
           nxt_state = TRANSFER;
         else begin
           nxt_state = IDLE;
