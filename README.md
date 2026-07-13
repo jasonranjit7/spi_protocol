@@ -11,8 +11,9 @@ spi_protocol/
 ├── design/
 │   ├── spi_master.v   # SPI Master — 3-state FSM, drives SCLK, MOSI, CS
 │   └── spi_slave.v    # SPI Slave  — 2-state FSM, clocked on SCLK negedge
+|   └── spi_top.v      # Top-level wrapper — master ↔ slave full-duplex loopback
 └── test/
-    └── spi_top.v      # Top-level wrapper — master ↔ slave full-duplex loopback
+    └── tb_spi_top.v
 ```
 
 ---
