@@ -1,92 +1,113 @@
-module spi_master(input miso,
-                  input en,
-                  input clk,
-                  input rst,
+`include "tick_divider.v"
+module spi_master(input clk,
                   input [7:0] data,
-                  output reg cs,
-                  output reg mosi,
-                  output sclk
-                 );                  
+                  input rst,
+                  input ready,
+                  input miso,
+                  output mosi,
+                  output sclk,
+                  output cs,
+                  output done);
   
-  reg [7:0] master_out_reg,master_in_reg;
-  reg [3:0] count; 
-  reg [1:0] state, nxt_state;
-  reg shift, c_rst;
-  localparam IDLE = 2'b00,
-  			 SETUP = 2'b01,
-  		 	 TRANSFER = 2'b10;
+  reg [7:0] m_reg;
+  reg tick_en;
+  wire en = state==TRANSFER;
   
   
-  //sclk gen
-  assign sclk = (state == TRANSFER) ? clk : 0;
+  tick_divider td(clk,rst,en,sclk);
+  
+  reg sclk_delay;
+  
+  //edge detector
+  always@(posedge clk) begin
+    if(rst)
+      sclk_delay<=0;
+    else
+      sclk_delay<=sclk;
+  end
+  
+  wire sclk_rising = sclk & ~sclk_delay;
+  wire sclk_falling = ~sclk & sclk_delay;
+  
+  
+  reg[1:0] state,nxt_state;
+  localparam IDLE=0,SETUP=1,TRANSFER=2,DONE=3;
+  
+  reg [3:0] bit_cnt;
+  //bit counter
+  always@(posedge clk) begin
+    if(rst)
+      bit_cnt<=0;
+    else if(state == TRANSFER) begin
+      if(sclk_falling)
+      	bit_cnt<=bit_cnt+1'b1;
+    end
+    else
+      bit_cnt<=0;
+  end
+  
+  reg miso_r;
+  //miso capture
+  always@(posedge clk) begin
+    if(rst)
+      miso_r<=0;
+    else if(sclk_rising)
+      miso_r<=miso;
+  end
+  
+  //shift register
+  always@(posedge clk) begin
+    if(rst) begin
+      m_reg<=0;
+    end
+    else begin
+      if(state == SETUP)
+        m_reg<=data;
+      if(state == TRANSFER && sclk_falling)
+        m_reg<={m_reg[6:0],miso_r};
+    end
+  end        
   
   //state register
   always@(posedge clk) begin
     if(rst)
-      state <= IDLE;
+      state<=IDLE;
     else
-      state <= nxt_state;
+      state<=nxt_state;
   end
   
-  //master drives mosi at posedge
-  always @(posedge clk) begin
-      if (rst)
-          master_out_reg <= 8'b0;
-      else if (state == SETUP)
-          master_out_reg <= data;
-      else if (shift)
-          master_out_reg <= {master_out_reg[6:0], 1'b0};
-  end
-
-  //master samples miso at negedge
-  always @(negedge clk) begin
-      if (rst)
-          master_in_reg <= 8'b0;
-      else if (shift)
-          master_in_reg <= {master_in_reg[6:0], miso};
-  end
-  
-  //bit counter
-  always@(posedge clk) begin
-    if(rst | c_rst)
-      count <= 0;
-    else if(state == TRANSFER)
-      count <= count + 1'b1;
-  end
-  
+  //transition logic
   always@(*) begin
     nxt_state = state;
-	shift = 0;
-    mosi = 0;
-    cs = 1;
-    c_rst = 0;
     case(state)
       IDLE: begin
-        if(en) begin
+        if(ready)
           nxt_state = SETUP;
-        end
-        else nxt_state = IDLE;
+        else
+          nxt_state = IDLE;
       end
       SETUP: begin
-        cs = 1'b0; //chip select pulled low
         nxt_state = TRANSFER;
       end
       TRANSFER: begin
-        mosi = master_out_reg[7]; //MSB sent first
-        //$display("mosi =%b", mosi);
-        if(count <4'd8 ) begin
-          shift = (count > 4'd0) ? 1'b1 : 1'b0; //signal shift register
+        if(bit_cnt<8)
           nxt_state = TRANSFER;
-        end
-        else begin
-          nxt_state = IDLE;
-          shift = 0;
-          c_rst = 1;
-        end
+        else
+          nxt_state = DONE;
       end
+      DONE: nxt_state = IDLE;
       default: nxt_state = IDLE;
     endcase
   end
-        
+  
+  assign done = state==DONE;
+  assign cs = (state==SETUP||state==TRANSFER)?1'b0:1'b1;
+  assign mosi = m_reg[7];
   
 endmodule
+        
+    
+      
+        
+  
+  

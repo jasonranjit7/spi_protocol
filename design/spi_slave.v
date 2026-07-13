@@ -1,67 +1,95 @@
-module spi_slave(input sclk,
+module spi_slave(input cs,
+                 input clk,
                  input rst,
+                 input sclk,
                  input mosi,
-                 input cs,
-                 output reg miso,
-                 output reg [7:0] sl_in
+                 output miso,
+                 output reg done,
+                 output reg [7:0] s_reg
                 );
   
-  reg [7:0] sl_out;
-  reg state, nxt_state;
-  reg [3:0] count;
-  
-  localparam IDLE = 1'b0,
-  			 TRANSFER = 1'b1;
-  
-  //bit counter
-  always@(negedge sclk) begin
-    if(rst)
-      count <= 0;
-    else if(state == TRANSFER)
-      count <= count + 1;
-    else 
-      count <=0;
-  end
-  
-  //state register
-  always@(negedge sclk) begin
-    if(rst)
-      state <= IDLE;
-    else
-      state <= nxt_state;
-  end
-  
-  //shift reg
-  always@(negedge sclk) begin
+  reg sclk_delay;
+  reg cs1,cs2,sclk1,sclk2,mosi1,mosi2;
+  //double flop synchroniser
+  always@(posedge clk) begin
     if(rst) begin
-      sl_out <= 8'b11111111;
-      sl_in <= 8'd0;
+      cs1 <=1'b1;
+      sclk1<=0;
+      mosi1<=0;
     end
-    else if(state == TRANSFER) begin
-      sl_out <= {sl_out[6:0],1'b0}; //MSB shifted out
-      sl_in <= {sl_in[6:0], mosi}; //MOSI shifted into MSB
+    else begin
+      cs1<=cs;
+      sclk1 <=sclk;
+      mosi1<=mosi;
     end
   end
-
-  always@(*) begin
-    nxt_state = state;
-    miso = 0;
-    case(state)
-      IDLE: begin
-        if(!cs) //slave turns on at cs low
-          nxt_state = TRANSFER;
-        else
-          nxt_state = IDLE;
-      end
-      TRANSFER: begin
-        miso = sl_out[7]; //MSB sent out
-        if(!cs && count!=4'd8)
-          nxt_state = TRANSFER;
-        else begin
-          nxt_state = IDLE;
-        end
-      end
-      default: nxt_state = IDLE;
-    endcase
+  
+  always@(posedge clk) begin
+    if(rst) begin
+      cs2 <=1'b1;
+      sclk2<=0;
+      mosi2<=0;
+    end
+    else begin
+      cs2<=cs1;
+      sclk2 <=sclk1;
+      mosi2<=mosi1;
+    end
   end
+  
+  wire sclk_rising = sclk1 & ~sclk2;
+  wire sclk_falling = ~sclk1& sclk2;
+  
+  reg [3:0] bit_cnt;
+  //bit counter
+  always@(posedge clk) begin
+    if(rst||cs2)
+      bit_cnt<=0;
+    else if(sclk_rising)
+      bit_cnt<=bit_cnt+1'b1;
+  end
+  
+  //sample mosi at rising edge
+  reg mosi_d;
+  always@(posedge clk) begin
+    if(rst)
+      mosi_d<=0;
+    else if(sclk_rising)
+      mosi_d<=mosi2;
+  end
+      
+  
+  //slave memory, shift out at falling edge
+  always@(posedge clk) begin
+    if(rst)
+      s_reg<=8'd0;
+    else if(cs2)
+      s_reg<=8'h42;
+    else if(!cs2 && sclk_falling)
+      s_reg<={s_reg[6:0],mosi_d};
+  end
+  
+  //output logic
+  always@(posedge clk) begin
+    if(rst)
+      done<=0;
+    else begin
+      if(!cs2 && sclk_falling && bit_cnt==8)
+        done<=1'b1;
+      else
+        done<=0;
+    end
+  end
+  
+  
+  
+  assign miso = (!cs2)?s_reg[7]:1'bz;
+  
+  
 endmodule
+  
+  
+  
+  
+      
+  
